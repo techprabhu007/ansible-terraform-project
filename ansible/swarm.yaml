@@ -1,0 +1,100 @@
+- name: 1. Install Docker on all nodes
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install dependencies
+      apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes
+      loop:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - software-properties-common
+        - python3-docker   # <-- Ansible needs this for community.docker modules
+
+    - name: Create directory for Docker GPG key
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+
+    - name: Copy Docker GPG key
+      copy:
+        src: docker.asc  # <-- The file we just downloaded
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+
+- name: 2. Initialize Docker Swarm
+  hosts: role_manager
+  become: yes
+  tasks:
+    - name: Initialize the swarm
+      community.docker.docker_swarm:
+        state: present
+      register: swarm_init
+
+    - name: Get the worker join token
+      set_fact:
+        worker_join_token: "{{ swarm_init.swarm_facts.JoinTokens.Worker }}"
+
+
+- name: 3. Join worker nodes to the Swarm
+  hosts: role_worker
+  become: yes
+  tasks:
+    - name: Check if the node is already in a swarm
+      shell: docker info | grep Swarm
+      register: swarm_status
+      changed_when: false
+      failed_when: false
+
+    - name: Join the swarm as a worker
+      community.docker.docker_swarm:
+        state: join
+        remote_addrs: [ '{{ hostvars[groups["role_manager"][0]].private_ip }}:2377' ]
+        join_token: "{{ hostvars[groups['role_manager'][0]].worker_join_token }}"
+      when: "'inactive' in swarm_status.stdout"
+
+- name: 4. Deploy Application Service
+  hosts: role_manager
+  become: yes
+  tasks:
+    - name: Deploy a visualizer service
+      community.docker.docker_swarm_service:
+        name: visualizer
+        image: dockersamples/visualizer:stable
+        publish:
+          - target_port: 8080
+            published_port: 8080
+        placement:
+          constraints: [ "node.role == manager" ]
+
+    - name: Deploy a web server service
+      community.docker.docker_swarm_service:
+        name: web_app
+        image: nginxdemos/hello
+        replicas: 5
+        publish:
+          - target_port: 80
+            published_port: 80

@@ -1,0 +1,20 @@
+[role_manager]
+manager_node ansible_host=35.90.111.242
+
+[role_worker]
+worker_node_1 ansible_host=18.246.166.91
+worker_node_2 ansible_host=34.219.146.218
+worker_node_3 ansible_host=54.189.119.130
+
+# This 'all:vars' section applies these variables to every host above
+[all:vars]
+# The user for your EC2 instance
+ansible_user=ubuntu
+
+# IMPORTANT: Use the correct full path to your key file
+ansible_ssh_private_key_file= /home/prabu/Downloads/docker-html.pem
+
+# Explicitly set the python interpreter for the remote hosts
+ansible_python_interpreter=/usr/bin/python3
+
+
